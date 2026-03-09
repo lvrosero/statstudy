@@ -693,6 +693,7 @@ img, svg { display: block; max-width: 100%; }
 
 
 
+
 // ═══════════════════════════════════════════════════════════════
 // DATA — MATERIAS & SYLLABUS
 // ═══════════════════════════════════════════════════════════════
@@ -4745,16 +4746,31 @@ function patchSaveAll() {
 }
 
 function showSyncBadge() {
-  var b = document.getElementById('sync-badge');
-  if (!b) return;
-  b.style.transition = 'none';
-  b.textContent = '☁️ Sincronizado';
-  b.style.opacity = '1';
-  clearTimeout(b._t);
-  b._t = setTimeout(function(){
-    b.style.transition = 'opacity 1.2s ease';
-    b.style.opacity = '0';
-  }, 1800);
+  // Show as floating pill just below top bar, fades out
+  var id = 'sync-float';
+  var pill = document.getElementById(id);
+  if (!pill) {
+    pill = document.createElement('div');
+    pill.id = id;
+    pill.style.cssText = [
+      'position:fixed;top:50px;left:50%;transform:translateX(-50%);',
+      'background:rgba(13,107,94,.92);color:white;',
+      'font-size:.72rem;font-weight:600;padding:5px 14px;',
+      'border-radius:99px;z-index:9998;pointer-events:none;',
+      'transition:opacity .8s ease;opacity:0;',
+      'box-shadow:0 2px 8px rgba(0,0,0,.15);',
+      'font-family:'Sora',sans-serif;letter-spacing:.2px;',
+    ].join('');
+    document.body.appendChild(pill);
+  }
+  pill.textContent = '☁️ Sincronizado';
+  pill.style.transition = 'none';
+  pill.style.opacity = '1';
+  clearTimeout(pill._t);
+  pill._t = setTimeout(function(){
+    pill.style.transition = 'opacity 1s ease';
+    pill.style.opacity = '0';
+  }, 2500);
 }
 
 // ── Update user info in header ────────────────────────────────
@@ -5007,16 +5023,30 @@ function resendVerification(email) {
 function resetPassword() {
   var email = (document.getElementById('login-email')||{}).value || '';
   if (!email) { setLoginError('Escribe tu correo primero'); return; }
+  if (!_fbAuth) { setLoginError('Firebase no está listo, intenta en un momento'); return; }
   _fbAuth.sendPasswordResetEmail(email).then(function() {
     setLoginError('');
-    toast('📧 Correo de recuperación enviado a ' + email, 4000);
+    // Show success inside login screen (toast not available here)
+    var err = document.getElementById('login-error');
+    if (err) {
+      err.style.color = '#0D6B5E';
+      err.textContent = '📧 Correo enviado a ' + email + '. Revisa tu bandeja.';
+      setTimeout(function(){ err.style.color = '#c62828'; err.textContent = ''; }, 5000);
+    }
   }).catch(function(e) {
-    setLoginError('Error: ' + e.message);
+    var msg = e.code === 'auth/user-not-found'
+      ? 'No existe una cuenta con ese correo'
+      : e.code === 'auth/invalid-email'
+      ? 'Correo inválido'
+      : 'Error: ' + e.message;
+    setLoginError(msg);
   });
 }
 
 
+
 </script>
+
 
 
 </body>
