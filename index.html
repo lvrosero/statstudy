@@ -508,7 +508,7 @@ img, svg { display: block; max-width: 100%; }
   </header>
 
   <!-- ── MAIN ───────────────────────────────────────────── -->
-  <main class="app-main" id="app-main">
+  <main class="app-main" id="app-main" style="padding-top:44px;">
 
     <!-- ══ 1. DASHBOARD ══════════════════════════════════ -->
     <section id="section-dashboard" class="section active"></section>
@@ -531,7 +531,14 @@ img, svg { display: block; max-width: 100%; }
   </main>
 
   <!-- ── BOTTOM NAV ─────────────────────────────────────── -->
-  <nav class="bottom-nav">
+  <div id="top-bar" style="position:fixed;top:0;left:0;right:0;height:44px;background:rgba(245,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:400;border-bottom:1px solid rgba(27,58,107,.08);">
+    <div style="font-family:'Lora',serif;font-size:.88rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span id="sync-badge" style="font-size:.7rem;color:#0D6B5E;font-weight:600;opacity:0;transition:opacity .4s;">☁️ Sincronizado</span>
+      <div id="user-badge" style="display:none;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:99px;background:rgba(13,107,94,.08);"></div>
+    </div>
+  </div>
+<nav class="bottom-nav">
     <button class="nav-btn active" id="bn-dashboard" onclick="showSection('dashboard')">
       <span class="nav-icon">🏠</span><span class="nav-label">Inicio</span>
     </button>
@@ -661,6 +668,7 @@ img, svg { display: block; max-width: 100%; }
 </html>
 
 <script>
+
 
 
 
@@ -3626,9 +3634,15 @@ function escAttr(s) {
 // INIT
 // ══════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
-  try { loadAll(); } catch(e) { console.warn('loadAll:', e); }
-  try { updateStreak(); } catch(e) {}
-  try { renderDashboard(); } catch(e) { console.warn('dashboard:', e); }
+  // Patch saveAll to also sync to cloud
+  patchSaveAll();
+  // Init Firebase — it will call loadAll + renderDashboard after auth
+  try { initFirebase(); } catch(e) {
+    console.warn('[FB] Init failed, running offline:', e);
+    try { loadAll(); } catch(e2) {}
+    try { updateStreak(); } catch(e2) {}
+    try { renderDashboard(); } catch(e2) {}
+  }
 
   // Keyboard: Escape closes note overlay or modals
   document.addEventListener('keydown', function(e) {
@@ -4568,7 +4582,399 @@ function showInstallToast(msg) {
   }, 3000);
 })();
 
+
+
+
+// ═══════════════════════════════════════════════════════════════
+// FIREBASE — Auth + Firestore Sync
+// ═══════════════════════════════════════════════════════════════
+
+var _fbApp    = null;
+var _fbAuth   = null;
+var _fbDb     = null;
+var _fbUser   = null;   // current user object
+var _syncTimer= null;
+
+var FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyDNHw8FPST8kql-Va6llVIysu8-GAVoiPc",
+  authDomain:        "statstudy.firebaseapp.com",
+  projectId:         "statstudy",
+  storageBucket:     "statstudy.firebasestorage.app",
+  messagingSenderId: "221373234223",
+  appId:             "1:221373234223:web:737f8dd53086de169c1ada"
+};
+
+// ── Bootstrap Firebase from CDN ───────────────────────────────
+function initFirebase(callback) {
+  if (_fbApp) { callback && callback(); return; }
+
+  var script1 = document.createElement('script');
+  script1.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js';
+  script1.onload = function() {
+    var script2 = document.createElement('script');
+    script2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
+    script2.onload = function() {
+      var script3 = document.createElement('script');
+      script3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
+      script3.onload = function() {
+        _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
+        _fbAuth = firebase.auth();
+        _fbDb   = firebase.firestore();
+        console.log('[FB] Firebase ready');
+        // Listen for auth state
+        _fbAuth.onAuthStateChanged(function(user) {
+          if (user) {
+            _fbUser = user;
+            onUserLoggedIn(user);
+          } else {
+            _fbUser = null;
+            showLoginScreen();
+          }
+        });
+        callback && callback();
+      };
+      document.head.appendChild(script3);
+    };
+    document.head.appendChild(script2);
+  };
+  document.head.appendChild(script1);
+}
+
+// ── Called when user is authenticated ────────────────────────
+function onUserLoggedIn(user) {
+  console.log('[FB] Logged in:', user.email || user.displayName);
+  hideLoginScreen();
+  updateUserBadge(user);
+  // Load cloud data (overrides localStorage)
+  loadFromCloud().then(function() {
+    try { renderDashboard(); } catch(e) {}
+  });
+}
+
+// ── Load all user data from Firestore ────────────────────────
+function loadFromCloud() {
+  if (!_fbUser || !_fbDb) return Promise.resolve();
+  var uid = _fbUser.uid;
+  return _fbDb.collection('users').doc(uid).get().then(function(doc) {
+    if (doc.exists) {
+      var d = doc.data();
+      if (d.data)      { try { data      = JSON.parse(d.data); } catch(e){} }
+      if (d.notes)     { try { notes     = JSON.parse(d.notes); } catch(e){} }
+      if (d.examPlans) { try { examPlans = JSON.parse(d.examPlans); } catch(e){} }
+      if (d.sessions)  { try { sessions  = JSON.parse(d.sessions); } catch(e){} }
+      if (d.streak)    { try { streak    = JSON.parse(d.streak); } catch(e){} }
+      if (d.historias) { try { historias = JSON.parse(d.historias); } catch(e){} }
+      // Ensure all materias exist
+      MATERIAS.forEach(function(m) {
+        if (!data[m.id]) data[m.id] = { topics:[], progress:0 };
+      });
+      console.log('[FB] Cloud data loaded');
+    } else {
+      // First time user — push localStorage data to cloud
+      console.log('[FB] New user, uploading local data');
+      loadAll();  // load from localStorage first
+      saveToCloud();
+    }
+  }).catch(function(e) {
+    console.warn('[FB] Load error, using local:', e);
+    loadAll();
+  });
+}
+
+// ── Save all user data to Firestore (debounced) ───────────────
+function saveToCloud() {
+  if (!_fbUser || !_fbDb) { saveAll(); return; }  // fallback to localStorage
+  clearTimeout(_syncTimer);
+  _syncTimer = setTimeout(function() {
+    var uid = _fbUser.uid;
+    _fbDb.collection('users').doc(uid).set({
+      data:      JSON.stringify(data),
+      notes:     JSON.stringify(notes),
+      examPlans: JSON.stringify(examPlans),
+      sessions:  JSON.stringify(sessions),
+      streak:    JSON.stringify(streak),
+      historias: JSON.stringify(historias),
+      updatedAt: new Date().toISOString(),
+      email:     _fbUser.email || '',
+      displayName: _fbUser.displayName || '',
+    }, { merge: true }).then(function() {
+      showSyncBadge();
+      saveAll(); // also save locally as backup
+    }).catch(function(e) {
+      console.warn('[FB] Save error:', e);
+      saveAll();
+    });
+  }, 1500);
+}
+
+// ── Override saveAll to also sync to cloud ───────────────────
+var _origSaveAll = null;
+function patchSaveAll() {
+  _origSaveAll = saveAll;
+  saveAll = function() {
+    // Save to localStorage always
+    try {
+      localStorage.setItem('ss2_data',     JSON.stringify(data));
+      localStorage.setItem('ss2_notes',    JSON.stringify(notes));
+      localStorage.setItem('ss2_exams',    JSON.stringify(examPlans));
+      localStorage.setItem('ss2_sessions', JSON.stringify(sessions));
+      localStorage.setItem('ss2_streak',   JSON.stringify(streak));
+      localStorage.setItem('ss2_historias',JSON.stringify(historias));
+    } catch(e) {}
+    // Also sync to cloud if logged in
+    if (_fbUser && _fbDb) saveToCloud();
+  };
+}
+
+function showSyncBadge() {
+  var b = document.getElementById('sync-badge');
+  if (!b) return;
+  b.textContent = '☁️ Sincronizado';
+  b.style.opacity = '1';
+  clearTimeout(b._t);
+  b._t = setTimeout(function(){ b.style.opacity='0'; }, 2500);
+}
+
+// ── Update user info in header ────────────────────────────────
+function updateUserBadge(user) {
+  var badge = document.getElementById('user-badge');
+  if (!badge) return;
+  var name = user.displayName || user.email || 'Usuario';
+  var first = name.split(' ')[0].split('@')[0];
+  var photo = user.photoURL;
+  badge.innerHTML = photo
+    ? '<img src="' + photo + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;"> <span style="font-size:.78rem;font-weight:600;">' + first + '</span>'
+    : '<div style="width:28px;height:28px;border-radius:50%;background:var(--sage);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:white;">' + first[0].toUpperCase() + '</div><span style="font-size:.78rem;font-weight:600;">' + first + '</span>';
+  badge.style.display = 'flex';
+  badge.title = 'Cerrar sesión';
+  badge.onclick = confirmLogout;
+}
+
+function confirmLogout() {
+  if (!confirm('¿Cerrar sesión? Tus datos están guardados en la nube.')) return;
+  _fbAuth.signOut().then(function() {
+    _fbUser = null;
+    showLoginScreen();
+    toast('👋 Sesión cerrada');
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ═══════════════════════════════════════════════════════════════
+
+function showLoginScreen() {
+  var existing = document.getElementById('login-screen');
+  if (existing) { existing.style.display = 'flex'; return; }
+
+  var screen = document.createElement('div');
+  screen.id = 'login-screen';
+  screen.style.cssText = [
+    'position:fixed;inset:0;z-index:99999;',
+    'background:linear-gradient(135deg,#F5F3EE 0%,#E8F4F0 100%);',
+    'display:flex;align-items:center;justify-content:center;',
+    'font-family:\'Sora\',sans-serif;padding:24px;',
+  ].join('');
+
+  var card = document.createElement('div');
+  card.style.cssText = [
+    'background:white;border-radius:24px;padding:40px 32px;',
+    'width:min(420px,100%);box-shadow:0 20px 60px rgba(27,58,107,.12);',
+    'display:flex;flex-direction:column;align-items:center;gap:0;',
+  ].join('');
+
+  // Logo area
+  var logo = document.createElement('div');
+  logo.style.cssText = 'text-align:center;margin-bottom:28px;';
+  logo.innerHTML =
+    '<div style="font-size:2.8rem;margin-bottom:8px;">⚕️</div>' +
+    '<div style="font-family:\'Lora\',serif;font-size:1.6rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>' +
+    '<div style="font-size:.78rem;color:#888;margin-top:4px;">Tu cuaderno inteligente de medicina</div>';
+  card.appendChild(logo);
+
+  // Error msg
+  var errMsg = document.createElement('div');
+  errMsg.id = 'login-error';
+  errMsg.style.cssText = 'color:#c62828;font-size:.78rem;margin-bottom:10px;text-align:center;min-height:18px;width:100%;';
+  card.appendChild(errMsg);
+
+  // Google button
+  var btnGoogle = document.createElement('button');
+  btnGoogle.style.cssText = [
+    'width:100%;padding:13px;border-radius:12px;border:1.5px solid #ddd;',
+    'background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;',
+    'font-size:.88rem;font-weight:600;color:#333;margin-bottom:20px;',
+    'transition:box-shadow .2s;',
+  ].join('');
+  btnGoogle.innerHTML =
+    '<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>' +
+    'Continuar con Google';
+  btnGoogle.onmouseenter = function(){ this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'; };
+  btnGoogle.onmouseleave = function(){ this.style.boxShadow='none'; };
+  btnGoogle.onclick = loginWithGoogle;
+  card.appendChild(btnGoogle);
+
+  // Divider
+  var div = document.createElement('div');
+  div.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;margin-bottom:20px;';
+  div.innerHTML = '<div style="flex:1;height:1px;background:#eee;"></div><span style="font-size:.75rem;color:#aaa;">o</span><div style="flex:1;height:1px;background:#eee;"></div>';
+  card.appendChild(div);
+
+  // Email input
+  var emailWrap = document.createElement('div');
+  emailWrap.style.cssText = 'width:100%;margin-bottom:10px;';
+  var emailLbl = document.createElement('div');
+  emailLbl.style.cssText = 'font-size:.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;';
+  emailLbl.textContent = 'Correo electrónico';
+  var emailInp = document.createElement('input');
+  emailInp.id = 'login-email'; emailInp.type = 'email'; emailInp.placeholder = 'tu@correo.com';
+  emailInp.style.cssText = 'width:100%;padding:12px 14px;border:1.5px solid #ddd;border-radius:10px;font-size:.88rem;outline:none;box-sizing:border-box;font-family:\'Sora\',sans-serif;';
+  emailInp.onfocus = function(){ this.style.borderColor='#0D6B5E'; };
+  emailInp.onblur  = function(){ this.style.borderColor='#ddd'; };
+  emailWrap.appendChild(emailLbl); emailWrap.appendChild(emailInp);
+  card.appendChild(emailWrap);
+
+  // Password input
+  var passWrap = document.createElement('div');
+  passWrap.style.cssText = 'width:100%;margin-bottom:20px;';
+  var passLbl = document.createElement('div');
+  passLbl.style.cssText = 'font-size:.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;';
+  passLbl.textContent = 'Contraseña';
+  var passInp = document.createElement('input');
+  passInp.id = 'login-pass'; passInp.type = 'password'; passInp.placeholder = 'Mínimo 6 caracteres';
+  passInp.style.cssText = emailInp.style.cssText;
+  passInp.onfocus = function(){ this.style.borderColor='#0D6B5E'; };
+  passInp.onblur  = function(){ this.style.borderColor='#ddd'; };
+  passInp.onkeydown = function(e){ if(e.key==='Enter') loginWithEmail(); };
+  passWrap.appendChild(passLbl); passWrap.appendChild(passInp);
+  card.appendChild(passWrap);
+
+  // Login button
+  var btnLogin = document.createElement('button');
+  btnLogin.style.cssText = [
+    'width:100%;padding:13px;border-radius:12px;border:none;',
+    'background:linear-gradient(135deg,#0D6B5E,#0A5549);color:white;',
+    'font-size:.9rem;font-weight:700;cursor:pointer;margin-bottom:12px;',
+    'font-family:\'Sora\',sans-serif;',
+  ].join('');
+  btnLogin.textContent = 'Iniciar sesión';
+  btnLogin.onclick = loginWithEmail;
+  card.appendChild(btnLogin);
+
+  // Register link
+  var regLink = document.createElement('div');
+  regLink.style.cssText = 'font-size:.78rem;color:#888;text-align:center;margin-bottom:8px;';
+  regLink.innerHTML = '¿No tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Crear cuenta</span>';
+  card.appendChild(regLink);
+
+  // Forgot password
+  var forgotLink = document.createElement('div');
+  forgotLink.style.cssText = 'font-size:.75rem;color:#aaa;text-align:center;cursor:pointer;';
+  forgotLink.textContent = '¿Olvidaste tu contraseña?';
+  forgotLink.onclick = resetPassword;
+  card.appendChild(forgotLink);
+
+  screen.appendChild(card);
+  document.body.appendChild(screen);
+
+  document.getElementById('btn-register').onclick = showRegisterMode;
+}
+
+function hideLoginScreen() {
+  var s = document.getElementById('login-screen');
+  if (s) s.style.display = 'none';
+}
+
+function setLoginError(msg) {
+  var el = document.getElementById('login-error');
+  if (el) el.textContent = msg;
+}
+
+// ── Login with email ──────────────────────────────────────────
+function loginWithEmail() {
+  var email = (document.getElementById('login-email')||{}).value || '';
+  var pass  = (document.getElementById('login-pass') ||{}).value || '';
+  if (!email || !pass) { setLoginError('Completa todos los campos'); return; }
+  setLoginError('');
+  _fbAuth.signInWithEmailAndPassword(email, pass)
+    .catch(function(e) {
+      if (e.code === 'auth/user-not-found') setLoginError('No existe una cuenta con ese correo');
+      else if (e.code === 'auth/wrong-password') setLoginError('Contraseña incorrecta');
+      else if (e.code === 'auth/invalid-email') setLoginError('Correo inválido');
+      else setLoginError('Error: ' + e.message);
+    });
+}
+
+// ── Login with Google ─────────────────────────────────────────
+function loginWithGoogle() {
+  var provider = new firebase.auth.GoogleAuthProvider();
+  _fbAuth.signInWithPopup(provider).catch(function(e) {
+    setLoginError('Error con Google: ' + e.message);
+  });
+}
+
+// ── Register mode ─────────────────────────────────────────────
+function showRegisterMode() {
+  // Swap button to "Crear cuenta"
+  var btn = document.querySelector('#login-screen button:nth-of-type(2)');
+  // Simpler: find login button by text
+  document.querySelectorAll('#login-screen button').forEach(function(b) {
+    if (b.textContent === 'Iniciar sesión') {
+      b.textContent = 'Crear cuenta';
+      b.onclick = registerWithEmail;
+    }
+  });
+  var lnk = document.getElementById('btn-register');
+  if (lnk) {
+    lnk.parentElement.innerHTML = '¿Ya tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Iniciar sesión</span>';
+    document.getElementById('btn-register').onclick = function() {
+      // swap back
+      document.querySelectorAll('#login-screen button').forEach(function(b) {
+        if (b.textContent === 'Crear cuenta') {
+          b.textContent = 'Iniciar sesión';
+          b.onclick = loginWithEmail;
+        }
+      });
+      lnk.parentElement.innerHTML = '¿No tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Crear cuenta</span>';
+      document.getElementById('btn-register').onclick = showRegisterMode;
+    };
+  }
+  setLoginError('');
+}
+
+function registerWithEmail() {
+  var email = (document.getElementById('login-email')||{}).value || '';
+  var pass  = (document.getElementById('login-pass') ||{}).value || '';
+  if (!email || !pass) { setLoginError('Completa todos los campos'); return; }
+  if (pass.length < 6)  { setLoginError('La contraseña debe tener al menos 6 caracteres'); return; }
+  setLoginError('');
+  _fbAuth.createUserWithEmailAndPassword(email, pass)
+    .then(function(cred) {
+      toast('🎉 ¡Cuenta creada! Bienvenida a STATstudy');
+    })
+    .catch(function(e) {
+      if (e.code === 'auth/email-already-in-use') setLoginError('Ya existe una cuenta con ese correo');
+      else if (e.code === 'auth/invalid-email') setLoginError('Correo inválido');
+      else if (e.code === 'auth/weak-password') setLoginError('Contraseña muy débil');
+      else setLoginError('Error: ' + e.message);
+    });
+}
+
+// ── Reset password ────────────────────────────────────────────
+function resetPassword() {
+  var email = (document.getElementById('login-email')||{}).value || '';
+  if (!email) { setLoginError('Escribe tu correo primero'); return; }
+  _fbAuth.sendPasswordResetEmail(email).then(function() {
+    setLoginError('');
+    toast('📧 Correo de recuperación enviado a ' + email, 4000);
+  }).catch(function(e) {
+    setLoginError('Error: ' + e.message);
+  });
+}
+
+
 </script>
+
 
 </body>
 </html>
