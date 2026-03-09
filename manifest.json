@@ -1,0 +1,33 @@
+{
+  "name": "StatStudy — Medicoblast Hub",
+  "short_name": "StatStudy",
+  "description": "Tu cuaderno inteligente de medicina. Organiza, planifica y estudia con técnicas científicas.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#F5F3EE",
+  "theme_color": "#1B3A6B",
+  "lang": "es",
+  "categories": ["education", "medical", "productivity"],
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    {
+      "name": "Cuaderno",
+      "url": "./index.html?section=cuaderno",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Historias Clínicas",
+      "url": "./index.html?section=historias",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Planificador",
+      "url": "./index.html?section=planificador",
+      "icons": [{ "src": "icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}
