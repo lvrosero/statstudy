@@ -508,7 +508,7 @@ img, svg { display: block; max-width: 100%; }
   </header>
 
   <!-- ── MAIN ───────────────────────────────────────────── -->
-  <main class="app-main" id="app-main" style="padding-top:44px;">
+  <main class="app-main" id="app-main" style="padding-top:40px;">
 
     <!-- ══ 1. DASHBOARD ══════════════════════════════════ -->
     <section id="section-dashboard" class="section active"></section>
@@ -531,11 +531,11 @@ img, svg { display: block; max-width: 100%; }
   </main>
 
   <!-- ── BOTTOM NAV ─────────────────────────────────────── -->
-  <div id="top-bar" style="position:fixed;top:0;left:0;right:0;height:44px;background:rgba(245,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:400;border-bottom:1px solid rgba(27,58,107,.08);">
+  <div id="top-bar" style="position:fixed;top:0;left:0;right:0;height:44px;max-height:44px;overflow:hidden;background:rgba(245,243,238,.95);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:9999;border-bottom:1px solid rgba(27,58,107,.08);">
     <div style="font-family:'Lora',serif;font-size:.88rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>
     <div style="display:flex;align-items:center;gap:10px;">
       <span id="sync-badge" style="font-size:.7rem;color:#0D6B5E;font-weight:600;opacity:0;transition:opacity .6s;pointer-events:none;">☁️ Sincronizado</span>
-      <div id="user-badge" style="display:none;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:99px;background:rgba(13,107,94,.08);"></div>
+      <div id="user-badge" style="display:none;align-items:center;gap:6px;cursor:pointer;padding:3px 8px;border-radius:99px;background:rgba(13,107,94,.1);max-height:34px;overflow:hidden;"></div>
     </div>
   </div>
 <nav class="bottom-nav">
@@ -4765,8 +4765,8 @@ function updateUserBadge(user) {
   var first = name.split(' ')[0].split('@')[0];
   var photo = user.photoURL;
   badge.innerHTML = photo
-    ? '<img src="' + photo + '" style="width:28px;height:28px;border-radius:50%;object-fit:cover;"> <span style="font-size:.78rem;font-weight:600;">' + first + '</span>'
-    : '<div style="width:28px;height:28px;border-radius:50%;background:var(--sage);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.8rem;color:white;">' + first[0].toUpperCase() + '</div><span style="font-size:.78rem;font-weight:600;">' + first + '</span>';
+    ? '<img src="' + photo + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;"> <span style="font-size:.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;display:inline-block;">' + first + '</span>'
+    : '<div style="width:24px;height:24px;border-radius:50%;background:var(--sage);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;color:white;flex-shrink:0;">' + first[0].toUpperCase() + '</div><span style="font-size:.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;display:inline-block;">' + first + '</span>';
   badge.style.display = 'flex';
   badge.title = 'Cerrar sesión';
   badge.onclick = confirmLogout;
