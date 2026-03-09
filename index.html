@@ -4622,6 +4622,15 @@ function initFirebase(callback) {
         _fbDb   = firebase.firestore();
         console.log('[FB] Firebase ready');
         // Listen for auth state
+        // Handle redirect result first (Google sign-in redirect)
+        _fbAuth.getRedirectResult().then(function(result) {
+          if (result && result.user) {
+            console.log('[FB] Redirect login OK:', result.user.email);
+          }
+        }).catch(function(e) {
+          console.warn('[FB] Redirect result error:', e.message);
+        });
+
         _fbAuth.onAuthStateChanged(function(user) {
           if (user) {
             _fbUser = user;
@@ -4738,13 +4747,14 @@ function patchSaveAll() {
 function showSyncBadge() {
   var b = document.getElementById('sync-badge');
   if (!b) return;
+  b.style.transition = 'none';
   b.textContent = '☁️ Sincronizado';
   b.style.opacity = '1';
   clearTimeout(b._t);
   b._t = setTimeout(function(){
-    b.style.transition = 'opacity 1s';
+    b.style.transition = 'opacity 1.2s ease';
     b.style.opacity = '0';
-  }, 2000);
+  }, 1800);
 }
 
 // ── Update user info in header ────────────────────────────────
@@ -4921,14 +4931,8 @@ function loginWithEmail() {
 function loginWithGoogle() {
   var provider = new firebase.auth.GoogleAuthProvider();
   provider.setCustomParameters({ prompt: 'select_account' });
-  _fbAuth.signInWithPopup(provider).catch(function(e) {
-    // Popup blocked? Try redirect
-    if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
-      _fbAuth.signInWithRedirect(provider);
-    } else {
-      setLoginError('Error con Google: ' + e.message);
-    }
-  });
+  // Use redirect (more reliable on mobile and GitHub Pages)
+  _fbAuth.signInWithRedirect(provider);
 }
 
 // ── Register mode ─────────────────────────────────────────────
