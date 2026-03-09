@@ -534,7 +534,7 @@ img, svg { display: block; max-width: 100%; }
   <div id="top-bar" style="position:fixed;top:0;left:0;right:0;height:44px;background:rgba(245,243,238,.92);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:400;border-bottom:1px solid rgba(27,58,107,.08);">
     <div style="font-family:'Lora',serif;font-size:.88rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>
     <div style="display:flex;align-items:center;gap:10px;">
-      <span id="sync-badge" style="font-size:.7rem;color:#0D6B5E;font-weight:600;opacity:0;transition:opacity .4s;">☁️ Sincronizado</span>
+      <span id="sync-badge" style="font-size:.7rem;color:#0D6B5E;font-weight:600;opacity:0;transition:opacity .6s;pointer-events:none;">☁️ Sincronizado</span>
       <div id="user-badge" style="display:none;align-items:center;gap:6px;cursor:pointer;padding:4px 8px;border-radius:99px;background:rgba(13,107,94,.08);"></div>
     </div>
   </div>
@@ -4643,6 +4643,15 @@ function initFirebase(callback) {
 // ── Called when user is authenticated ────────────────────────
 function onUserLoggedIn(user) {
   console.log('[FB] Logged in:', user.email || user.displayName);
+  // Block unverified email users (Google users are always verified)
+  if (!user.emailVerified && user.providerData[0] && user.providerData[0].providerId === 'password') {
+    _fbAuth.signOut();
+    showLoginScreen();
+    setTimeout(function() {
+      setLoginError('⚠️ Debes verificar tu correo antes de ingresar. Revisa tu bandeja de entrada.');
+    }, 500);
+    return;
+  }
   hideLoginScreen();
   updateUserBadge(user);
   // Load cloud data (overrides localStorage)
@@ -4732,7 +4741,10 @@ function showSyncBadge() {
   b.textContent = '☁️ Sincronizado';
   b.style.opacity = '1';
   clearTimeout(b._t);
-  b._t = setTimeout(function(){ b.style.opacity='0'; }, 2500);
+  b._t = setTimeout(function(){
+    b.style.transition = 'opacity 1s';
+    b.style.opacity = '0';
+  }, 2000);
 }
 
 // ── Update user info in header ────────────────────────────────
@@ -4908,8 +4920,14 @@ function loginWithEmail() {
 // ── Login with Google ─────────────────────────────────────────
 function loginWithGoogle() {
   var provider = new firebase.auth.GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
   _fbAuth.signInWithPopup(provider).catch(function(e) {
-    setLoginError('Error con Google: ' + e.message);
+    // Popup blocked? Try redirect
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/popup-closed-by-user') {
+      _fbAuth.signInWithRedirect(provider);
+    } else {
+      setLoginError('Error con Google: ' + e.message);
+    }
   });
 }
 
@@ -4950,7 +4968,19 @@ function registerWithEmail() {
   setLoginError('');
   _fbAuth.createUserWithEmailAndPassword(email, pass)
     .then(function(cred) {
-      toast('🎉 ¡Cuenta creada! Bienvenida a STATstudy');
+      // Send verification email
+      cred.user.sendEmailVerification().then(function() {
+        setLoginError('');
+        // Show confirmation message instead of logging in
+        var card = document.querySelector('#login-screen > div');
+        card.innerHTML = '<div style="text-align:center;padding:20px 0;">' +
+          '<div style="font-size:3rem;margin-bottom:16px;">📧</div>' +
+          '<div style="font-family:\'Lora\',serif;font-size:1.4rem;font-weight:700;color:#0D3D35;margin-bottom:12px;">¡Revisa tu correo!</div>' +
+          '<div style="font-size:.88rem;color:#666;margin-bottom:24px;line-height:1.6;">Enviamos un enlace de verificación a<br><strong>' + email + '</strong><br>Haz clic en el enlace para activar tu cuenta.</div>' +
+          '<button onclick="_fbAuth.signOut();showLoginScreen();" style="padding:12px 32px;background:linear-gradient(135deg,#0D6B5E,#0A5549);color:white;border:none;border-radius:12px;font-size:.9rem;font-weight:700;cursor:pointer;font-family:\'Sora\',sans-serif;">Ir al inicio de sesión</button>' +
+          '<div style="margin-top:16px;font-size:.75rem;color:#aaa;cursor:pointer;" onclick="resendVerification(\'' + email + '\')">¿No llegó? Reenviar correo</div>' +
+          '</div>';
+      });
     })
     .catch(function(e) {
       if (e.code === 'auth/email-already-in-use') setLoginError('Ya existe una cuenta con ese correo');
@@ -4961,6 +4991,15 @@ function registerWithEmail() {
 }
 
 // ── Reset password ────────────────────────────────────────────
+function resendVerification(email) {
+  var user = _fbAuth.currentUser;
+  if (user) {
+    user.sendEmailVerification().then(function() {
+      toast('📧 Correo reenviado a ' + email, 3000);
+    });
+  }
+}
+
 function resetPassword() {
   var email = (document.getElementById('login-email')||{}).value || '';
   if (!email) { setLoginError('Escribe tu correo primero'); return; }
