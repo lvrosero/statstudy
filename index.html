@@ -490,7 +490,7 @@ img, svg { display: block; max-width: 100%; }
 </style>
 </head>
 <body>
-<div class="app-shell">
+<div class="app-shell" style="visibility:hidden;">
 
   <!-- ── HEADER ─────────────────────────────────────────── -->
   <header class="app-header">
@@ -501,14 +501,16 @@ img, svg { display: block; max-width: 100%; }
         <div class="brand-sub">Medicoblast Hub</div>
       </div>
     </div>
-    <div class="header-right">
+    <div class="header-right" style="display:flex;align-items:center;gap:6px;">
+      <div id="fb-badge" style="display:none;align-items:center;gap:5px;cursor:pointer;padding:3px 9px;border-radius:99px;background:rgba(255,255,255,.18);color:white;"></div>
       <button class="header-btn" onclick="showStreakInfo()" title="Racha">🔥</button>
       <button class="header-btn" id="header-pom-btn" onclick="showSection('sesion')" title="Pomodoro">⏱</button>
     </div>
   </header>
+  <div id="fb-toast" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(12px);z-index:9999;background:rgba(13,107,94,.93);color:white;font-size:.73rem;font-weight:600;padding:7px 16px;border-radius:99px;opacity:0;transition:opacity .4s,transform .4s;pointer-events:none;box-shadow:0 4px 16px rgba(0,0,0,.18);">&#9729;&#65039; Sincronizado</div>
 
   <!-- ── MAIN ───────────────────────────────────────────── -->
-  <main class="app-main" id="app-main" style="padding-top:40px;">
+  <main class="app-main" id="app-main">
 
     <!-- ══ 1. DASHBOARD ══════════════════════════════════ -->
     <section id="section-dashboard" class="section active"></section>
@@ -531,14 +533,7 @@ img, svg { display: block; max-width: 100%; }
   </main>
 
   <!-- ── BOTTOM NAV ─────────────────────────────────────── -->
-  <div id="top-bar" style="position:fixed;top:0;left:0;right:0;height:44px;max-height:44px;overflow:hidden;background:rgba(245,243,238,.95);backdrop-filter:blur(8px);display:flex;align-items:center;justify-content:space-between;padding:0 16px;z-index:9999;border-bottom:1px solid rgba(27,58,107,.08);">
-    <div style="font-family:'Lora',serif;font-size:.88rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>
-    <div style="display:flex;align-items:center;gap:10px;">
-      <span id="sync-badge" style="font-size:.7rem;color:#0D6B5E;font-weight:600;opacity:0;transition:opacity .6s;pointer-events:none;">☁️ Sincronizado</span>
-      <div id="user-badge" style="display:none;align-items:center;gap:6px;cursor:pointer;padding:3px 8px;border-radius:99px;background:rgba(13,107,94,.1);max-height:34px;overflow:hidden;"></div>
-    </div>
-  </div>
-<nav class="bottom-nav">
+  <nav class="bottom-nav">
     <button class="nav-btn active" id="bn-dashboard" onclick="showSection('dashboard')">
       <span class="nav-icon">🏠</span><span class="nav-label">Inicio</span>
     </button>
@@ -668,8 +663,6 @@ img, svg { display: block; max-width: 100%; }
 </html>
 
 <script>
-
-
 
 
 
@@ -3635,14 +3628,52 @@ function escAttr(s) {
 // INIT
 // ══════════════════════════════════════════════════════════════
 document.addEventListener('DOMContentLoaded', function() {
-  // Patch saveAll to also sync to cloud
-  patchSaveAll();
-  // Init Firebase — it will call loadAll + renderDashboard after auth
-  try { initFirebase(); } catch(e) {
-    console.warn('[FB] Init failed, running offline:', e);
+  // Handle Firebase action URLs (verifyEmail, resetPassword)
+  var urlParams = new URLSearchParams(window.location.search);
+  var mode = urlParams.get('mode');
+  var oobCode = urlParams.get('oobCode');
+  if (mode === 'verifyEmail' && oobCode) {
+    // Apply email verification code
+    setTimeout(function() {
+      try { fbShowLogin(); } catch(e) {}
+      setTimeout(function() {
+        try {
+          firebase && firebase.auth().applyActionCode(oobCode).then(function() {
+            fbMsg('Correo verificado exitosamente. Ya puedes iniciar sesion.', '#2e7d32');
+          }).catch(function(e) {
+            fbMsg('El link de verificacion expiro. Intenta iniciar sesion de nuevo.', '#e65100');
+          });
+        } catch(e) {}
+      }, 2000);
+    }, 500);
+  } else if (mode === 'resetPassword' && oobCode) {
+    setTimeout(function() {
+      try { fbShowLogin(); } catch(e) {}
+      setTimeout(function() {
+        var np = prompt('Escribe tu nueva contrasena (min. 6 caracteres):');
+        if (np && np.length >= 6) {
+          try {
+            firebase.auth().confirmPasswordReset(oobCode, np).then(function() {
+              fbMsg('Contrasena cambiada exitosamente. Ya puedes iniciar sesion.', '#2e7d32');
+            }).catch(function(e) {
+              fbMsg('Error al cambiar contrasena: ' + e.message);
+            });
+          } catch(e) {}
+        }
+      }, 1500);
+    }, 500);
+  } else {
+    // Normal load — show login
+    setTimeout(function() { try { fbShowLogin(); } catch(e) {} }, 80);
+  }
+  // Init Firebase
+  try { fbInit(); } catch(e) {
+    console.warn("[FB] offline:", e);
     try { loadAll(); } catch(e2) {}
     try { updateStreak(); } catch(e2) {}
     try { renderDashboard(); } catch(e2) {}
+    var app = document.querySelector(".app-shell");
+    if (app) app.style.visibility = "visible";
   }
 
   // Keyboard: Escape closes note overlay or modals
@@ -4586,468 +4617,343 @@ function showInstallToast(msg) {
 
 
 
-// ═══════════════════════════════════════════════════════════════
-// FIREBASE — Auth + Firestore Sync
-// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════
+// FIREBASE AUTH + FIRESTORE SYNC
+// ═══════════════════════════════════════════════════════
+var _fb = { auth: null, db: null, user: null, timer: null };
 
-var _fbApp    = null;
-var _fbAuth   = null;
-var _fbDb     = null;
-var _fbUser   = null;   // current user object
-var _syncTimer= null;
-
-var FIREBASE_CONFIG = {
+var FB_CFG = {
   apiKey:            "AIzaSyDNHw8FPST8kql-Va6llVIysu8-GAVoiPc",
-  authDomain:        "lvrosero.github.io",
+  authDomain:        "statstudy.firebaseapp.com",
   projectId:         "statstudy",
   storageBucket:     "statstudy.firebasestorage.app",
   messagingSenderId: "221373234223",
   appId:             "1:221373234223:web:737f8dd53086de169c1ada"
 };
 
-// ── Bootstrap Firebase from CDN ───────────────────────────────
-function initFirebase(callback) {
-  if (_fbApp) { callback && callback(); return; }
+var FB_URL = "https://statstudy.netlify.app/";
 
-  var script1 = document.createElement('script');
-  script1.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js';
-  script1.onload = function() {
-    var script2 = document.createElement('script');
-    script2.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js';
-    script2.onload = function() {
-      var script3 = document.createElement('script');
-      script3.src = 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js';
-      script3.onload = function() {
-        _fbApp  = firebase.initializeApp(FIREBASE_CONFIG);
-        _fbAuth = firebase.auth();
-        _fbDb   = firebase.firestore();
-        console.log('[FB] Firebase ready');
-        // Listen for auth state
-        // Handle redirect result first (Google sign-in redirect)
-        _fbAuth.getRedirectResult().then(function(result) {
-          if (result && result.user) {
-            console.log('[FB] Redirect login OK:', result.user.email);
-          }
-        }).catch(function(e) {
-          console.warn('[FB] Redirect result error:', e.message);
-        });
-
-        _fbAuth.onAuthStateChanged(function(user) {
-          if (user) {
-            _fbUser = user;
-            onUserLoggedIn(user);
-          } else {
-            _fbUser = null;
-            showLoginScreen();
-          }
-        });
-        callback && callback();
-      };
-      document.head.appendChild(script3);
-    };
-    document.head.appendChild(script2);
-  };
-  document.head.appendChild(script1);
+function fbInit() {
+  function loadScript(src, cb) {
+    var s = document.createElement("script");
+    s.src = src; s.onload = cb;
+    document.head.appendChild(s);
+  }
+  loadScript("https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js", function() {
+  loadScript("https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js", function() {
+  loadScript("https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js", function() {
+    firebase.initializeApp(FB_CFG);
+    _fb.auth = firebase.auth();
+    _fb.db   = firebase.firestore();
+    // Handle Google redirect
+    _fb.auth.getRedirectResult().catch(function(e) { console.warn("[FB] redirect:", e.message); });
+    // Handle verifyEmail/resetPassword action codes via Firebase
+    var up = new URLSearchParams(window.location.search);
+    var fbMode = up.get('mode'), fbCode = up.get('oobCode');
+    if (fbMode === 'verifyEmail' && fbCode) {
+      _fb.auth.applyActionCode(fbCode).then(function() {
+        fbMsg('Correo verificado exitosamente. Ya puedes iniciar sesion.', '#2e7d32');
+        // Clean URL
+        window.history.replaceState({}, document.title, '/');
+      }).catch(function(e) {
+        fbMsg('Link expirado o ya usado. Intenta iniciar sesion directamente.', '#e65100');
+      });
+    } else if (fbMode === 'resetPassword' && fbCode) {
+      var np = prompt('Escribe tu nueva contrasena (min. 6 caracteres):');
+      if (np && np.length >= 6) {
+        _fb.auth.confirmPasswordReset(fbCode, np).then(function() {
+          fbMsg('Contrasena cambiada. Ya puedes iniciar sesion.', '#2e7d32');
+          window.history.replaceState({}, document.title, '/');
+        }).catch(function(e) { fbMsg('Error: ' + e.message); });
+      }
+    }
+    // Auth state
+    _fb.auth.onAuthStateChanged(function(user) {
+      if (user) { _fb.user = user; fbOnLogin(user); }
+      else      { _fb.user = null; fbShowLogin(); }
+    });
+  });});});
 }
 
-// ── Called when user is authenticated ────────────────────────
-function onUserLoggedIn(user) {
-  console.log('[FB] Logged in:', user.email || user.displayName);
-  // Block unverified email users (Google users are always verified)
-  if (!user.emailVerified && user.providerData[0] && user.providerData[0].providerId === 'password') {
-    _fbAuth.signOut();
-    showLoginScreen();
-    setTimeout(function() {
-      setLoginError('⚠️ Debes verificar tu correo antes de ingresar. Revisa tu bandeja de entrada.');
-    }, 500);
-    return;
-  }
-  hideLoginScreen();
-  updateUserBadge(user);
-  // Load cloud data (overrides localStorage)
-  loadFromCloud().then(function() {
+// ── After successful login ──────────────────────────────
+function fbOnLogin(user) {
+  fbHideLogin();
+  fbBadge(user);
+  fbLoad().then(function() {
+    try { updateStreak(); } catch(e) {}
     try { renderDashboard(); } catch(e) {}
   });
 }
 
-// ── Load all user data from Firestore ────────────────────────
-function loadFromCloud() {
-  if (!_fbUser || !_fbDb) return Promise.resolve();
-  var uid = _fbUser.uid;
-  return _fbDb.collection('users').doc(uid).get().then(function(doc) {
-    if (doc.exists) {
-      var d = doc.data();
-      if (d.data)      { try { data      = JSON.parse(d.data); } catch(e){} }
-      if (d.notes)     { try { notes     = JSON.parse(d.notes); } catch(e){} }
-      if (d.examPlans) { try { examPlans = JSON.parse(d.examPlans); } catch(e){} }
-      if (d.sessions)  { try { sessions  = JSON.parse(d.sessions); } catch(e){} }
-      if (d.streak)    { try { streak    = JSON.parse(d.streak); } catch(e){} }
-      if (d.historias) { try { historias = JSON.parse(d.historias); } catch(e){} }
-      // Ensure all materias exist
-      MATERIAS.forEach(function(m) {
-        if (!data[m.id]) data[m.id] = { topics:[], progress:0 };
-      });
-      console.log('[FB] Cloud data loaded');
-    } else {
-      // First time user — push localStorage data to cloud
-      console.log('[FB] New user, uploading local data');
-      loadAll();  // load from localStorage first
-      saveToCloud();
-    }
-  }).catch(function(e) {
-    console.warn('[FB] Load error, using local:', e);
-    loadAll();
-  });
+// ── Load data from Firestore ────────────────────────────
+function fbLoad() {
+  if (!_fb.user || !_fb.db) { loadAll(); return Promise.resolve(); }
+  return _fb.db.collection("users").doc(_fb.user.uid).get()
+    .then(function(doc) {
+      if (doc.exists) {
+        var d = doc.data();
+        try { if (d.data)      data      = JSON.parse(d.data); } catch(e) {}
+        try { if (d.notes)     notes     = JSON.parse(d.notes); } catch(e) {}
+        try { if (d.examPlans) examPlans = JSON.parse(d.examPlans); } catch(e) {}
+        try { if (d.sessions)  sessions  = JSON.parse(d.sessions); } catch(e) {}
+        try { if (d.streak)    streak    = JSON.parse(d.streak); } catch(e) {}
+        try { if (d.historias) historias = JSON.parse(d.historias); } catch(e) {}
+        MATERIAS.forEach(function(m) { if (!data[m.id]) data[m.id] = { topics:[], progress:0 }; });
+      } else { loadAll(); fbSave(); }
+    }).catch(function() { loadAll(); });
 }
 
-// ── Save all user data to Firestore (debounced) ───────────────
-function saveToCloud() {
-  if (!_fbUser || !_fbDb) { saveAll(); return; }  // fallback to localStorage
-  clearTimeout(_syncTimer);
-  _syncTimer = setTimeout(function() {
-    var uid = _fbUser.uid;
-    _fbDb.collection('users').doc(uid).set({
+// ── Save to Firestore (debounced) ───────────────────────
+function fbSave() {
+  try {
+    localStorage.setItem("ss2_data",     JSON.stringify(data));
+    localStorage.setItem("ss2_notes",    JSON.stringify(notes));
+    localStorage.setItem("ss2_exams",    JSON.stringify(examPlans));
+    localStorage.setItem("ss2_sessions", JSON.stringify(sessions));
+    localStorage.setItem("ss2_streak",   JSON.stringify(streak));
+    localStorage.setItem("ss2_historias",JSON.stringify(historias));
+  } catch(e) {}
+  if (!_fb.user || !_fb.db) return;
+  clearTimeout(_fb.timer);
+  _fb.timer = setTimeout(function() {
+    _fb.db.collection("users").doc(_fb.user.uid).set({
       data:      JSON.stringify(data),
       notes:     JSON.stringify(notes),
       examPlans: JSON.stringify(examPlans),
       sessions:  JSON.stringify(sessions),
       streak:    JSON.stringify(streak),
       historias: JSON.stringify(historias),
-      updatedAt: new Date().toISOString(),
-      email:     _fbUser.email || '',
-      displayName: _fbUser.displayName || '',
-    }, { merge: true }).then(function() {
-      showSyncBadge();
-      saveAll(); // also save locally as backup
-    }).catch(function(e) {
-      console.warn('[FB] Save error:', e);
-      saveAll();
-    });
+      updatedAt: new Date().toISOString()
+    }, { merge: true }).then(fbToast).catch(function(e) { console.warn("[FB] save:", e); });
   }, 1500);
 }
 
-// ── Override saveAll to also sync to cloud ───────────────────
-var _origSaveAll = null;
-function patchSaveAll() {
-  _origSaveAll = saveAll;
-  saveAll = function() {
-    // Save to localStorage always
-    try {
-      localStorage.setItem('ss2_data',     JSON.stringify(data));
-      localStorage.setItem('ss2_notes',    JSON.stringify(notes));
-      localStorage.setItem('ss2_exams',    JSON.stringify(examPlans));
-      localStorage.setItem('ss2_sessions', JSON.stringify(sessions));
-      localStorage.setItem('ss2_streak',   JSON.stringify(streak));
-      localStorage.setItem('ss2_historias',JSON.stringify(historias));
-    } catch(e) {}
-    // Also sync to cloud if logged in
-    if (_fbUser && _fbDb) saveToCloud();
-  };
-}
+// Override saveAll
+saveAll = function() { fbSave(); };
 
-function showSyncBadge() {
-  // Show as floating pill just below top bar, fades out
-  var id = 'sync-float';
-  var pill = document.getElementById(id);
-  if (!pill) {
-    pill = document.createElement('div');
-    pill.id = id;
-    pill.style.cssText = [
-      'position:fixed;top:50px;left:50%;transform:translateX(-50%);',
-      'background:rgba(13,107,94,.92);color:white;',
-      'font-size:.72rem;font-weight:600;padding:5px 14px;',
-      'border-radius:99px;z-index:9998;pointer-events:none;',
-      'transition:opacity .8s ease;opacity:0;',
-      'box-shadow:0 2px 8px rgba(0,0,0,.15);',
-      'font-family:'Sora',sans-serif;letter-spacing:.2px;',
-    ].join('');
-    document.body.appendChild(pill);
-  }
-  pill.textContent = '☁️ Sincronizado';
-  pill.style.transition = 'none';
-  pill.style.opacity = '1';
-  clearTimeout(pill._t);
-  pill._t = setTimeout(function(){
-    pill.style.transition = 'opacity 1s ease';
-    pill.style.opacity = '0';
+// ── Sync toast ──────────────────────────────────────────
+function fbToast() {
+  var b = document.getElementById("fb-toast");
+  if (!b) return;
+  clearTimeout(b._t);
+  b.style.transition = "none";
+  b.style.opacity = "1";
+  b.style.transform = "translateX(-50%) translateY(0)";
+  b._t = setTimeout(function() {
+    b.style.transition = "opacity .8s, transform .6s";
+    b.style.opacity = "0";
+    b.style.transform = "translateX(-50%) translateY(12px)";
   }, 2500);
 }
 
-// ── Update user info in header ────────────────────────────────
-function updateUserBadge(user) {
-  var badge = document.getElementById('user-badge');
-  if (!badge) return;
-  var name = user.displayName || user.email || 'Usuario';
-  var first = name.split(' ')[0].split('@')[0];
+// ── User badge ──────────────────────────────────────────
+function fbBadge(user) {
+  var el = document.getElementById("fb-badge");
+  if (!el) return;
+  var name = (user.displayName || user.email || "Usuario").split(" ")[0].split("@")[0];
   var photo = user.photoURL;
-  badge.innerHTML = photo
-    ? '<img src="' + photo + '" style="width:24px;height:24px;border-radius:50%;object-fit:cover;flex-shrink:0;"> <span style="font-size:.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;display:inline-block;">' + first + '</span>'
-    : '<div style="width:24px;height:24px;border-radius:50%;background:var(--sage);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.75rem;color:white;flex-shrink:0;">' + first[0].toUpperCase() + '</div><span style="font-size:.72rem;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:90px;display:inline-block;">' + first + '</span>';
-  badge.style.display = 'flex';
-  badge.title = 'Cerrar sesión';
-  badge.onclick = confirmLogout;
+  var img = photo
+    ? "<img src=" + photo + " style='width:24px;height:24px;border-radius:50%;object-fit:cover;border:2px solid rgba(255,255,255,.5);'>"
+    : "<div style='width:24px;height:24px;border-radius:50%;background:rgba(255,255,255,.25);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.72rem;'>" + name[0].toUpperCase() + "</div>";
+  el.innerHTML = img + "<span style='font-size:.72rem;font-weight:600;'>" + name + "</span>";
+  el.style.display = "flex";
+  el.onclick = function() {
+    if (confirm("Cerrar sesion?")) {
+      _fb.auth.signOut();
+      toast && toast("Sesion cerrada");
+    }
+  };
 }
 
-function confirmLogout() {
-  if (!confirm('¿Cerrar sesión? Tus datos están guardados en la nube.')) return;
-  _fbAuth.signOut().then(function() {
-    _fbUser = null;
-    showLoginScreen();
-    toast('👋 Sesión cerrada');
+// ══════════════════════════════════════════════════════════
+// LOGIN SCREEN
+// ══════════════════════════════════════════════════════════
+function fbShowLogin() {
+  var app = document.querySelector(".app-shell");
+  if (app) app.style.visibility = "hidden";
+  var el = document.getElementById("fb-login");
+  if (el) { el.style.display = "flex"; return; }
+  fbBuildLogin();
+}
+
+function fbHideLogin() {
+  var el = document.getElementById("fb-login");
+  if (el) el.style.display = "none";
+  var app = document.querySelector(".app-shell");
+  if (app) app.style.visibility = "visible";
+}
+
+function fbBuildLogin() {
+  var scr = document.createElement("div");
+  scr.id = "fb-login";
+  scr.style.cssText = "position:fixed;inset:0;z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;background:linear-gradient(145deg,#f0ede6,#e4f0ec);";
+
+  var card = document.createElement("div");
+  card.style.cssText = "background:white;border-radius:22px;padding:36px 28px;width:min(400px,100%);box-shadow:0 20px 60px rgba(0,0,0,.12);display:flex;flex-direction:column;align-items:center;";
+
+  // Header
+  var hdr = document.createElement("div");
+  hdr.style.cssText = "text-align:center;margin-bottom:22px;";
+  hdr.innerHTML = "<div style='font-size:2.2rem;margin-bottom:6px;'>&#9877;&#65039;</div>" +
+    "<div style='font-size:1.45rem;font-weight:700;color:#0D3D35;margin-bottom:3px;'>STAT<span style='font-weight:300;color:#4A7A74;'>study</span></div>" +
+    "<div style='font-size:.73rem;color:#aaa;'>Tu cuaderno inteligente de medicina</div>";
+  card.appendChild(hdr);
+
+  // Error/success message
+  var msg = document.createElement("div");
+  msg.id = "fb-msg";
+  msg.style.cssText = "width:100%;min-height:20px;font-size:.76rem;text-align:center;margin-bottom:10px;border-radius:8px;padding:0 4px;";
+  card.appendChild(msg);
+
+  // Google button
+  var gBtn = document.createElement("button");
+  gBtn.style.cssText = "width:100%;padding:12px;border-radius:11px;border:1.5px solid #e0e0e0;background:white;display:flex;align-items:center;justify-content:center;gap:10px;font-size:.85rem;font-weight:600;color:#333;cursor:pointer;margin-bottom:16px;";
+  gBtn.innerHTML = "<svg width='18' height='18' viewBox='0 0 48 48'><path fill='#EA4335' d='M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z'/><path fill='#4285F4' d='M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z'/><path fill='#FBBC05' d='M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z'/><path fill='#34A853' d='M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z'/></svg>Continuar con Google";
+  gBtn.onmouseenter = function() { this.style.boxShadow = "0 3px 12px rgba(0,0,0,.1)"; };
+  gBtn.onmouseleave = function() { this.style.boxShadow = "none"; };
+  gBtn.onclick = function() {
+    var p = new firebase.auth.GoogleAuthProvider();
+    p.setCustomParameters({ prompt: "select_account" });
+    _fb.auth.signInWithRedirect(p);
+  };
+  card.appendChild(gBtn);
+
+  // Divider
+  var div = document.createElement("div");
+  div.style.cssText = "width:100%;display:flex;align-items:center;gap:10px;margin-bottom:14px;";
+  div.innerHTML = "<div style='flex:1;height:1px;background:#eee;'></div><span style='font-size:.7rem;color:#ccc;'>o</span><div style='flex:1;height:1px;background:#eee;'></div>";
+  card.appendChild(div);
+
+  // Inputs
+  function mkInp(id, type, ph) {
+    var i = document.createElement("input");
+    i.id = id; i.type = type; i.placeholder = ph;
+    i.style.cssText = "width:100%;padding:11px 13px;border:1.5px solid #e0e0e0;border-radius:10px;font-size:.84rem;outline:none;box-sizing:border-box;margin-bottom:10px;";
+    i.onfocus = function() { this.style.borderColor = "#0D6B5E"; };
+    i.onblur  = function() { this.style.borderColor = "#e0e0e0"; };
+    return i;
+  }
+  card.appendChild(mkInp("fb-email", "email",    "Correo electronico"));
+  card.appendChild(mkInp("fb-pass",  "password", "Contrasena (min. 6 caracteres)"));
+
+  // Action button
+  var actBtn = document.createElement("button");
+  actBtn.id = "fb-act";
+  actBtn.style.cssText = "width:100%;padding:12px;border-radius:11px;border:none;background:linear-gradient(135deg,#0D6B5E,#0A5549);color:white;font-size:.87rem;font-weight:700;cursor:pointer;margin-bottom:10px;";
+  actBtn.textContent = "Iniciar sesion";
+  actBtn.onclick = fbLogin;
+  card.appendChild(actBtn);
+
+  // Toggle
+  var tog = document.createElement("div");
+  tog.style.cssText = "font-size:.75rem;color:#aaa;text-align:center;margin-bottom:6px;";
+  tog.innerHTML = "No tienes cuenta? <span id='fb-tog' style='color:#0D6B5E;font-weight:700;cursor:pointer;'>Crear cuenta</span>";
+  card.appendChild(tog);
+
+  // Forgot
+  var forg = document.createElement("div");
+  forg.style.cssText = "font-size:.72rem;color:#bbb;cursor:pointer;text-align:center;";
+  forg.textContent = "Olvide mi contrasena";
+  forg.onclick = fbForgot;
+  card.appendChild(forg);
+
+  scr.appendChild(card);
+  document.body.appendChild(scr);
+  document.getElementById("fb-tog").onclick = fbToggle;
+
+  // Enter key on password
+  document.getElementById("fb-pass").addEventListener("keydown", function(e) {
+    if (e.key === "Enter") document.getElementById("fb-act").click();
   });
 }
 
-// ═══════════════════════════════════════════════════════════════
-// LOGIN SCREEN
-// ═══════════════════════════════════════════════════════════════
-
-function showLoginScreen() {
-  var existing = document.getElementById('login-screen');
-  if (existing) { existing.style.display = 'flex'; return; }
-
-  var screen = document.createElement('div');
-  screen.id = 'login-screen';
-  screen.style.cssText = [
-    'position:fixed;inset:0;z-index:99999;',
-    'background:linear-gradient(135deg,#F5F3EE 0%,#E8F4F0 100%);',
-    'display:flex;align-items:center;justify-content:center;',
-    'font-family:\'Sora\',sans-serif;padding:24px;',
-  ].join('');
-
-  var card = document.createElement('div');
-  card.style.cssText = [
-    'background:white;border-radius:24px;padding:40px 32px;',
-    'width:min(420px,100%);box-shadow:0 20px 60px rgba(27,58,107,.12);',
-    'display:flex;flex-direction:column;align-items:center;gap:0;',
-  ].join('');
-
-  // Logo area
-  var logo = document.createElement('div');
-  logo.style.cssText = 'text-align:center;margin-bottom:28px;';
-  logo.innerHTML =
-    '<div style="font-size:2.8rem;margin-bottom:8px;">⚕️</div>' +
-    '<div style="font-family:\'Lora\',serif;font-size:1.6rem;font-weight:700;color:#0D3D35;">STAT<span style="font-weight:300;color:#4A7A74;">study</span></div>' +
-    '<div style="font-size:.78rem;color:#888;margin-top:4px;">Tu cuaderno inteligente de medicina</div>';
-  card.appendChild(logo);
-
-  // Error msg
-  var errMsg = document.createElement('div');
-  errMsg.id = 'login-error';
-  errMsg.style.cssText = 'color:#c62828;font-size:.78rem;margin-bottom:10px;text-align:center;min-height:18px;width:100%;';
-  card.appendChild(errMsg);
-
-  // Google button
-  var btnGoogle = document.createElement('button');
-  btnGoogle.style.cssText = [
-    'width:100%;padding:13px;border-radius:12px;border:1.5px solid #ddd;',
-    'background:white;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;',
-    'font-size:.88rem;font-weight:600;color:#333;margin-bottom:20px;',
-    'transition:box-shadow .2s;',
-  ].join('');
-  btnGoogle.innerHTML =
-    '<svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.31-8.16 2.31-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>' +
-    'Continuar con Google';
-  btnGoogle.onmouseenter = function(){ this.style.boxShadow='0 4px 16px rgba(0,0,0,.1)'; };
-  btnGoogle.onmouseleave = function(){ this.style.boxShadow='none'; };
-  btnGoogle.onclick = loginWithGoogle;
-  card.appendChild(btnGoogle);
-
-  // Divider
-  var div = document.createElement('div');
-  div.style.cssText = 'display:flex;align-items:center;gap:12px;width:100%;margin-bottom:20px;';
-  div.innerHTML = '<div style="flex:1;height:1px;background:#eee;"></div><span style="font-size:.75rem;color:#aaa;">o</span><div style="flex:1;height:1px;background:#eee;"></div>';
-  card.appendChild(div);
-
-  // Email input
-  var emailWrap = document.createElement('div');
-  emailWrap.style.cssText = 'width:100%;margin-bottom:10px;';
-  var emailLbl = document.createElement('div');
-  emailLbl.style.cssText = 'font-size:.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;';
-  emailLbl.textContent = 'Correo electrónico';
-  var emailInp = document.createElement('input');
-  emailInp.id = 'login-email'; emailInp.type = 'email'; emailInp.placeholder = 'tu@correo.com';
-  emailInp.style.cssText = 'width:100%;padding:12px 14px;border:1.5px solid #ddd;border-radius:10px;font-size:.88rem;outline:none;box-sizing:border-box;font-family:\'Sora\',sans-serif;';
-  emailInp.onfocus = function(){ this.style.borderColor='#0D6B5E'; };
-  emailInp.onblur  = function(){ this.style.borderColor='#ddd'; };
-  emailWrap.appendChild(emailLbl); emailWrap.appendChild(emailInp);
-  card.appendChild(emailWrap);
-
-  // Password input
-  var passWrap = document.createElement('div');
-  passWrap.style.cssText = 'width:100%;margin-bottom:20px;';
-  var passLbl = document.createElement('div');
-  passLbl.style.cssText = 'font-size:.7rem;font-weight:700;color:#888;text-transform:uppercase;letter-spacing:.5px;margin-bottom:5px;';
-  passLbl.textContent = 'Contraseña';
-  var passInp = document.createElement('input');
-  passInp.id = 'login-pass'; passInp.type = 'password'; passInp.placeholder = 'Mínimo 6 caracteres';
-  passInp.style.cssText = emailInp.style.cssText;
-  passInp.onfocus = function(){ this.style.borderColor='#0D6B5E'; };
-  passInp.onblur  = function(){ this.style.borderColor='#ddd'; };
-  passInp.onkeydown = function(e){ if(e.key==='Enter') loginWithEmail(); };
-  passWrap.appendChild(passLbl); passWrap.appendChild(passInp);
-  card.appendChild(passWrap);
-
-  // Login button
-  var btnLogin = document.createElement('button');
-  btnLogin.style.cssText = [
-    'width:100%;padding:13px;border-radius:12px;border:none;',
-    'background:linear-gradient(135deg,#0D6B5E,#0A5549);color:white;',
-    'font-size:.9rem;font-weight:700;cursor:pointer;margin-bottom:12px;',
-    'font-family:\'Sora\',sans-serif;',
-  ].join('');
-  btnLogin.textContent = 'Iniciar sesión';
-  btnLogin.onclick = loginWithEmail;
-  card.appendChild(btnLogin);
-
-  // Register link
-  var regLink = document.createElement('div');
-  regLink.style.cssText = 'font-size:.78rem;color:#888;text-align:center;margin-bottom:8px;';
-  regLink.innerHTML = '¿No tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Crear cuenta</span>';
-  card.appendChild(regLink);
-
-  // Forgot password
-  var forgotLink = document.createElement('div');
-  forgotLink.style.cssText = 'font-size:.75rem;color:#aaa;text-align:center;cursor:pointer;';
-  forgotLink.textContent = '¿Olvidaste tu contraseña?';
-  forgotLink.onclick = resetPassword;
-  card.appendChild(forgotLink);
-
-  screen.appendChild(card);
-  document.body.appendChild(screen);
-
-  document.getElementById('btn-register').onclick = showRegisterMode;
+var _fbMode = "login";
+function fbToggle() {
+  _fbMode = _fbMode === "login" ? "register" : "login";
+  var btn = document.getElementById("fb-act");
+  var tog = document.getElementById("fb-tog");
+  if (_fbMode === "register") {
+    btn.textContent = "Crear cuenta"; btn.onclick = fbRegister;
+    tog.parentElement.innerHTML = "Ya tienes cuenta? <span id='fb-tog' style='color:#0D6B5E;font-weight:700;cursor:pointer;'>Iniciar sesion</span>";
+  } else {
+    btn.textContent = "Iniciar sesion"; btn.onclick = fbLogin;
+    tog.parentElement.innerHTML = "No tienes cuenta? <span id='fb-tog' style='color:#0D6B5E;font-weight:700;cursor:pointer;'>Crear cuenta</span>";
+  }
+  document.getElementById("fb-tog").onclick = fbToggle;
+  fbMsg("", "");
 }
 
-function hideLoginScreen() {
-  var s = document.getElementById('login-screen');
-  if (s) s.style.display = 'none';
+function fbVal() {
+  return {
+    email: ((document.getElementById("fb-email") || {}).value || "").trim(),
+    pass:  ((document.getElementById("fb-pass")  || {}).value || "")
+  };
+}
+function fbMsg(txt, color) {
+  var el = document.getElementById("fb-msg");
+  if (!el) return;
+  el.textContent = txt;
+  el.style.color = color || "#c62828";
+  el.style.background = txt ? (color === "#2e7d32" ? "rgba(46,125,50,.08)" : "rgba(198,40,40,.06)") : "";
+  el.style.padding = txt ? "6px 10px" : "0";
 }
 
-function setLoginError(msg) {
-  var el = document.getElementById('login-error');
-  if (el) el.textContent = msg;
-}
-
-// ── Login with email ──────────────────────────────────────────
-function loginWithEmail() {
-  var email = (document.getElementById('login-email')||{}).value || '';
-  var pass  = (document.getElementById('login-pass') ||{}).value || '';
-  if (!email || !pass) { setLoginError('Completa todos los campos'); return; }
-  setLoginError('');
-  _fbAuth.signInWithEmailAndPassword(email, pass)
+function fbLogin() {
+  var v = fbVal();
+  if (!v.email || !v.pass) { fbMsg("Completa todos los campos"); return; }
+  _fb.auth.signInWithEmailAndPassword(v.email, v.pass)
+    .then(function(c) {
+      if (!c.user.emailVerified) {
+        _fb.auth.signOut();
+        fbMsg("Debes verificar tu correo antes de entrar. Revisa tu bandeja.", "#e65100");
+        window._fbRe = v;
+      }
+    })
     .catch(function(e) {
-      if (e.code === 'auth/user-not-found') setLoginError('No existe una cuenta con ese correo');
-      else if (e.code === 'auth/wrong-password') setLoginError('Contraseña incorrecta');
-      else if (e.code === 'auth/invalid-email') setLoginError('Correo inválido');
-      else setLoginError('Error: ' + e.message);
+      var m = { "auth/user-not-found": "Correo o contrasena incorrectos",
+                "auth/wrong-password": "Contrasena incorrecta",
+                "auth/invalid-credential": "Correo o contrasena incorrectos",
+                "auth/invalid-email": "Correo invalido" };
+      fbMsg(m[e.code] || ("Error: " + e.message));
     });
 }
 
-// ── Login with Google ─────────────────────────────────────────
-function loginWithGoogle() {
-  var provider = new firebase.auth.GoogleAuthProvider();
-  provider.setCustomParameters({ prompt: 'select_account' });
-  // Use redirect (more reliable on mobile and GitHub Pages)
-  _fbAuth.signInWithRedirect(provider);
-}
-
-// ── Register mode ─────────────────────────────────────────────
-function showRegisterMode() {
-  // Swap button to "Crear cuenta"
-  var btn = document.querySelector('#login-screen button:nth-of-type(2)');
-  // Simpler: find login button by text
-  document.querySelectorAll('#login-screen button').forEach(function(b) {
-    if (b.textContent === 'Iniciar sesión') {
-      b.textContent = 'Crear cuenta';
-      b.onclick = registerWithEmail;
-    }
-  });
-  var lnk = document.getElementById('btn-register');
-  if (lnk) {
-    lnk.parentElement.innerHTML = '¿Ya tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Iniciar sesión</span>';
-    document.getElementById('btn-register').onclick = function() {
-      // swap back
-      document.querySelectorAll('#login-screen button').forEach(function(b) {
-        if (b.textContent === 'Crear cuenta') {
-          b.textContent = 'Iniciar sesión';
-          b.onclick = loginWithEmail;
-        }
-      });
-      lnk.parentElement.innerHTML = '¿No tienes cuenta? <span id="btn-register" style="color:#0D6B5E;font-weight:700;cursor:pointer;">Crear cuenta</span>';
-      document.getElementById('btn-register').onclick = showRegisterMode;
-    };
-  }
-  setLoginError('');
-}
-
-function registerWithEmail() {
-  var email = (document.getElementById('login-email')||{}).value || '';
-  var pass  = (document.getElementById('login-pass') ||{}).value || '';
-  if (!email || !pass) { setLoginError('Completa todos los campos'); return; }
-  if (pass.length < 6)  { setLoginError('La contraseña debe tener al menos 6 caracteres'); return; }
-  setLoginError('');
-  _fbAuth.createUserWithEmailAndPassword(email, pass)
-    .then(function(cred) {
-      // Send verification email
-      cred.user.sendEmailVerification().then(function() {
-        setLoginError('');
-        // Show confirmation message instead of logging in
-        var card = document.querySelector('#login-screen > div');
-        card.innerHTML = '<div style="text-align:center;padding:20px 0;">' +
-          '<div style="font-size:3rem;margin-bottom:16px;">📧</div>' +
-          '<div style="font-family:\'Lora\',serif;font-size:1.4rem;font-weight:700;color:#0D3D35;margin-bottom:12px;">¡Revisa tu correo!</div>' +
-          '<div style="font-size:.88rem;color:#666;margin-bottom:24px;line-height:1.6;">Enviamos un enlace de verificación a<br><strong>' + email + '</strong><br>Haz clic en el enlace para activar tu cuenta.</div>' +
-          '<button onclick="_fbAuth.signOut();showLoginScreen();" style="padding:12px 32px;background:linear-gradient(135deg,#0D6B5E,#0A5549);color:white;border:none;border-radius:12px;font-size:.9rem;font-weight:700;cursor:pointer;font-family:\'Sora\',sans-serif;">Ir al inicio de sesión</button>' +
-          '<div style="margin-top:16px;font-size:.75rem;color:#aaa;cursor:pointer;" onclick="resendVerification(\'' + email + '\')">¿No llegó? Reenviar correo</div>' +
-          '</div>';
+function fbRegister() {
+  var v = fbVal();
+  if (!v.email || !v.pass) { fbMsg("Completa todos los campos"); return; }
+  if (v.pass.length < 6)   { fbMsg("La contrasena debe tener al menos 6 caracteres"); return; }
+  _fb.auth.createUserWithEmailAndPassword(v.email, v.pass)
+    .then(function(c) {
+      return c.user.sendEmailVerification({ url: FB_URL }).then(function() {
+        _fb.auth.signOut();
+        fbMsg("Cuenta creada. Revisa tu correo para verificarla y luego inicia sesion.", "#2e7d32");
+        fbToggle(); // switch back to login mode
       });
     })
     .catch(function(e) {
-      if (e.code === 'auth/email-already-in-use') setLoginError('Ya existe una cuenta con ese correo');
-      else if (e.code === 'auth/invalid-email') setLoginError('Correo inválido');
-      else if (e.code === 'auth/weak-password') setLoginError('Contraseña muy débil');
-      else setLoginError('Error: ' + e.message);
+      var m = { "auth/email-already-in-use": "Ya existe una cuenta con ese correo",
+                "auth/invalid-email": "Correo invalido" };
+      fbMsg(m[e.code] || ("Error: " + e.message));
     });
 }
 
-// ── Reset password ────────────────────────────────────────────
-function resendVerification(email) {
-  var user = _fbAuth.currentUser;
-  if (user) {
-    user.sendEmailVerification().then(function() {
-      toast('📧 Correo reenviado a ' + email, 3000);
-    });
+function fbForgot() {
+  var email = ((document.getElementById("fb-email") || {}).value || "").trim();
+  if (!email) {
+    email = prompt("Escribe tu correo para recuperar tu contrasena:");
+    if (!email) return;
+    var inp = document.getElementById("fb-email");
+    if (inp) inp.value = email;
   }
+  _fb.auth.sendPasswordResetEmail(email, { url: FB_URL })
+    .then(function() { fbMsg("Correo de recuperacion enviado a " + email, "#2e7d32"); })
+    .catch(function(e) {
+      fbMsg(e.code === "auth/user-not-found" ? "No existe cuenta con ese correo" : "Error: " + e.message);
+    });
 }
-
-function resetPassword() {
-  var email = (document.getElementById('login-email')||{}).value || '';
-  if (!email) { setLoginError('Escribe tu correo primero'); return; }
-  if (!_fbAuth) { setLoginError('Firebase no está listo, intenta en un momento'); return; }
-  _fbAuth.sendPasswordResetEmail(email).then(function() {
-    setLoginError('');
-    // Show success inside login screen (toast not available here)
-    var err = document.getElementById('login-error');
-    if (err) {
-      err.style.color = '#0D6B5E';
-      err.textContent = '📧 Correo enviado a ' + email + '. Revisa tu bandeja.';
-      setTimeout(function(){ err.style.color = '#c62828'; err.textContent = ''; }, 5000);
-    }
-  }).catch(function(e) {
-    var msg = e.code === 'auth/user-not-found'
-      ? 'No existe una cuenta con ese correo'
-      : e.code === 'auth/invalid-email'
-      ? 'Correo inválido'
-      : 'Error: ' + e.message;
-    setLoginError(msg);
-  });
-}
-
 
 
 </script>
-
-
 
 </body>
 </html>
